@@ -47,12 +47,18 @@ func main() {
 	wsContainer := restful.NewContainer()
 	wsContainer.Router(restful.CurlyRouter{})
 
-	t := TrainResource{}
+	t := TrainController{
+		DB: DB,
+	}
 	t.Register(wsContainer)
 
 	log.Printf("start listening on localhost:8000")
 	server := &http.Server{Addr: ":8000", Handler: wsContainer}
 	log.Fatal(server.ListenAndServe())
+}
+
+type TrainController struct {
+	DB *sql.DB
 }
 
 // TrainResource is the model for holding rail information
@@ -63,7 +69,7 @@ type TrainResource struct {
 }
 
 // Registeradds paths and routes to a new service instance
-func (t *TrainResource) Register(container *restful.Container) {
+func (t *TrainController) Register(container *restful.Container) {
 	ws := new(restful.WebService)
 	ws.Path("/v1/trains").Consumes(restful.MIME_JSON).Produces(restful.MIME_JSON)
 	ws.Route(ws.GET("/{train-id}").To(t.getTrain))
@@ -73,21 +79,22 @@ func (t *TrainResource) Register(container *restful.Container) {
 }
 
 // GET http://localhost:8000/v1/trains/1
-func (t TrainResource) getTrain(request *restful.Request, response *restful.Response) {
+func (t TrainController) getTrain(request *restful.Request, response *restful.Response) {
 	id := request.PathParameter("train-id")
-	err := DB.QueryRow("SELECT ID, DRIVER_NAME, OPERATING_STATUS FROM train WHERE id=?", id).Scan(&t.ID, &t.DriverName, &t.OperatingStatus)
+	train := TrainResource{}
+	err := t.DB.QueryRow("SELECT ID, DRIVER_NAME, OPERATING_STATUS FROM train WHERE id=?", id).Scan(&train.ID, &train.DriverName, &train.OperatingStatus)
 
 	if err != nil {
 		log.Println(err)
 		response.AddHeader("Content-Type", "text/plain")
 		response.WriteErrorString(http.StatusNotFound, "Train could	not be found.")
 	} else {
-		response.WriteEntity(t)
+		response.WriteEntity(train)
 	}
 }
 
 // POST http://localhost:8000/v1/trains
-func (t TrainResource) createTrain(request *restful.Request, response *restful.Response) {
+func (t TrainController) createTrain(request *restful.Request, response *restful.Response) {
 	log.Println("Body: ", request.Request.Body)
 	decoder := json.NewDecoder(request.Request.Body)
 	var b TrainResource
@@ -98,7 +105,7 @@ func (t TrainResource) createTrain(request *restful.Request, response *restful.R
 	}
 	log.Println(b.DriverName, b.OperatingStatus)
 	// Error handling is obvious here. So omitting...
-	statement, _ := DB.Prepare("insert into train (DRIVER_NAME,	OPERATING_STATUS) values (?, ?)")
+	statement, _ := t.DB.Prepare("insert into train (DRIVER_NAME,	OPERATING_STATUS) values (?, ?)")
 	result, err := statement.Exec(b.DriverName, b.OperatingStatus)
 	if err == nil {
 		newID, _ := result.LastInsertId()
@@ -111,9 +118,9 @@ func (t TrainResource) createTrain(request *restful.Request, response *restful.R
 }
 
 // DELETE http://localhost:8000/v1/trains/1
-func (t TrainResource) removeTrain(request *restful.Request, response *restful.Response) {
+func (t TrainController) removeTrain(request *restful.Request, response *restful.Response) {
 	id := request.PathParameter("train-id")
-	statement, _ := DB.Prepare("delete from train where id=?")
+	statement, _ := t.DB.Prepare("delete from train where id=?")
 	_, err := statement.Exec(id)
 	if err == nil {
 		response.WriteHeader(http.StatusOK)
